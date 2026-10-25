@@ -8,11 +8,20 @@
 </head>
 <body>
 
-  <div class="instructions">Toca las burbujas para leer e Mensaje jejejj</div>
+  <!-- Pantalla de inicio para desbloquear audio de forma garantizada -->
+  <div id="overlay-start">
+    <div class="start-card">
+      <h2> Para ti mi vida</h2>
+      <button id="btn-start">Toca para empezar</button>
+    </div>
+  </div>
+
+  <div class="instructions">Toca las burbujas para leer el mensaje</div>
+
   <canvas id="canvas"></canvas>
 
-  <!-- Pista de audio invisible -->
-  <audio id="bg-music" src="musica.mp3" loop preload="auto" style="display:none;"></audio>
+  <!-- Pista de audio principal -->
+  <audio id="bg-music" src="mp3/mps.mp3" loop preload="auto" playsinline></audio>
 
   <script src="js.js"></script>
 </body>

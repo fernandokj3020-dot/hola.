@@ -1,9 +1,13 @@
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const bgMusic = document.getElementById('bg-music');
+const overlayStart = document.getElementById('overlay-start');
+const btnStart = document.getElementById('btn-start');
 
 let width, height, dpr;
 let musicStarted = false;
+let audioCtx = null;
+let synthInterval = null;
 
 // Secuencia exacta del mensaje en orden
 const wordList = [
@@ -14,26 +18,80 @@ const wordList = [
   "LOS", "ANIMOS", "TE", "AMO...♡"
 ];
 
-let wordIndex = 0; // Índice global para mantener el orden secuencial
+let wordIndex = 0;
 
 const colors = [
-  { r: 0, g: 243, b: 255 },   // Cían neón
-  { r: 255, g: 0, b: 128 },   // Magenta / Rosa
-  { r: 157, g: 0, b: 255 },   // Púrpura
-  { r: 0, g: 255, b: 150 },   // Verde neón
-  { r: 255, g: 200, b: 0 }    // Dorado
+  { r: 0, g: 243, b: 255 },   
+  { r: 255, g: 0, b: 128 },   
+  { r: 157, g: 0, b: 255 },   
+  { r: 0, g: 255, b: 150 },   
+  { r: 255, g: 200, b: 0 }    
 ];
 
-// Activar audio al interactuar
-function playAudio() {
-  if (!musicStarted && bgMusic) {
-    bgMusic.volume = 0.7;
-    bgMusic.play().then(() => {
-      musicStarted = true;
-    }).catch(err => {
-      console.log("Error al reproducir audio:", err);
-    });
+// Generador de audio sintético de respaldo por si el archivo MP3 no carga
+function startSynthFallback() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+  
+  if (!synthInterval) {
+    const notes = [261.63, 329.63, 392.00, 523.25, 587.33, 659.25];
+    synthInterval = setInterval(() => {
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      const freq = notes[Math.floor(Math.random() * notes.length)];
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+
+      gain.gain.setValueAtTime(0, audioCtx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.06, audioCtx.currentTime + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 3.0);
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 3.0);
+    }, 900);
+  }
+}
+
+// Iniciar música con el toque del usuario
+function startExperience(e) {
+  if (e) e.preventDefault();
+
+  if (!musicStarted && bgMusic) {
+    bgMusic.volume = 0.8;
+    
+    const playPromise = bgMusic.play();
+    if (playPromise !== undefined) {
+      playPromise.then(() => {
+        musicStarted = true;
+      }).catch(err => {
+        console.warn("No se pudo cargar el archivo mp3. Activando sintetizador de respaldo:", err);
+        startSynthFallback();
+      });
+    }
+  } else {
+    startSynthFallback();
+  }
+
+  // Ocultar overlay
+  if (overlayStart) {
+    overlayStart.style.opacity = '0';
+    setTimeout(() => {
+      overlayStart.style.visibility = 'hidden';
+      overlayStart.style.display = 'none';
+    }, 500);
+  }
+}
+
+if (btnStart) {
+  btnStart.addEventListener('click', startExperience);
+  btnStart.addEventListener('touchstart', startExperience, { passive: false });
 }
 
 function setupCanvas() {
@@ -49,7 +107,6 @@ function setupCanvas() {
 
 window.addEventListener('resize', setupCanvas);
 
-// Fondo de Estrellas Titilantes
 const stars = [];
 function initStars() {
   stars.length = 0;
@@ -84,39 +141,44 @@ const orbes = [];
 const particles = [];
 const floatingTexts = [];
 
-// Clase Orbe con asignación secuencial de palabras
 class Orb {
-  constructor(initialDelay = 0) {
-    this.reset(initialDelay);
-  }
-
-  reset(extraDelay = 0) {
+  constructor(word, startY) {
     const minDimension = Math.min(width, height);
-    this.radius = Math.random() * (minDimension * 0.035) + (minDimension * 0.055);
-    this.x = Math.random() * (width - this.radius * 2) + this.radius;
     
-    // Asignar palabra en el ORDEN EXACTO del mensaje
-    this.word = wordList[wordIndex];
-    wordIndex = (wordIndex + 1) % wordList.length; // Avanzar al siguiente término
-
-    this.y = height + this.radius + extraDelay;
-    this.speedY = Math.random() * 0.8 + 1.0; // Velocidad de subida constante
+    if (width < 600) {
+      this.radius = 34; 
+    } else {
+      this.radius = Math.random() * (minDimension * 0.015) + (minDimension * 0.04);
+    }
+    
+    const padding = this.radius + 20;
+    this.x = Math.random() * (width - padding * 2) + padding;
+    this.y = startY;
+    
+    this.word = word;
+    this.speedY = 1.3; 
+    
     this.color = colors[Math.floor(Math.random() * colors.length)];
     this.angle = Math.random() * Math.PI * 2;
-    this.swingSpeed = Math.random() * 0.02 + 0.01;
-    this.swingAmplitude = Math.random() * 1.0 + 0.3;
+    this.swingSpeed = 0.02;
+    this.swingAmplitude = width < 600 ? 0.2 : 0.4;
     this.pulse = 0;
+    this.active = true;
   }
 
   update() {
     this.y -= this.speedY;
     this.angle += this.swingSpeed;
     this.x += Math.sin(this.angle) * this.swingAmplitude;
+    
+    const safetyMargin = this.radius + 8;
+    if (this.x < safetyMargin) this.x = safetyMargin;
+    if (this.x > width - safetyMargin) this.x = width - safetyMargin;
+
     this.pulse += 0.05;
 
-    // Explotar al llegar arriba
-    if (this.y - this.radius <= 50) {
-      this.explode();
+    if (this.y + this.radius <= 0) {
+      this.explode(false); 
     }
   }
 
@@ -125,7 +187,6 @@ class Orb {
     const currentRadius = this.radius + Math.sin(this.pulse) * 2;
     const { r, g, b } = this.color;
 
-    // Resplandor neón
     const gradient = ctx.createRadialGradient(
       this.x, this.y, 0,
       this.x, this.y, currentRadius
@@ -139,16 +200,14 @@ class Orb {
     ctx.arc(this.x, this.y, currentRadius * 1.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Borde brillante
     ctx.strokeStyle = `rgba(${r}, ${g}, ${b}, 0.9)`;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(this.x, this.y, currentRadius, 0, Math.PI * 2);
     ctx.stroke();
 
-    // Palabra interna
     ctx.fillStyle = "#ffffff";
-    const fontSize = Math.max(10, Math.floor(currentRadius * 0.35));
+    const fontSize = width < 600 ? Math.max(9, Math.floor(currentRadius * 0.28)) : Math.max(12, Math.floor(currentRadius * 0.33));
     ctx.font = `bold ${fontSize}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -159,32 +218,34 @@ class Orb {
     ctx.restore();
   }
 
-  explode() {
-    const particleCount = width < 600 ? 35 : 50;
+  explode(manual = true) {
+    if (!this.active) return;
+    this.active = false;
+
+    const particleCount = width < 600 ? 25 : 40;
     for (let i = 0; i < particleCount; i++) {
       particles.push(new Particle(this.x, this.y, this.color));
     }
-    floatingTexts.push(new FloatingText(this.x, this.y, this.word, this.color));
     
-    // Al reiniciar la orbe, toma la siguiente palabra de la secuencia
-    this.reset(Math.random() * 60);
+    if (manual) {
+      floatingTexts.push(new FloatingText(this.x, this.y, this.word, this.color));
+    }
   }
 }
 
-// Partículas tras la explosión
 class Particle {
   constructor(x, y, color) {
     this.x = x;
     this.y = y;
     this.color = color;
-    this.radius = Math.random() * 3 + 1;
+    this.radius = Math.random() * 2.5 + 1;
     const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * 6 + 2;
+    const speed = Math.random() * 4 + 1.5;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
     this.alpha = 1;
-    this.decay = Math.random() * 0.025 + 0.015;
-    this.gravity = 0.04;
+    this.decay = Math.random() * 0.03 + 0.015;
+    this.gravity = 0.03;
   }
 
   update() {
@@ -201,7 +262,7 @@ class Particle {
     ctx.globalAlpha = Math.max(0, this.alpha);
     ctx.fillStyle = `rgb(${this.color.r}, ${this.color.g}, ${this.color.b})`;
     ctx.shadowColor = `rgb(${this.color.r}, ${this.color.g}, ${this.color.b})`;
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
     ctx.fill();
@@ -209,7 +270,6 @@ class Particle {
   }
 }
 
-// Texto flotante al explotar
 class FloatingText {
   constructor(x, y, text, color) {
     this.x = x;
@@ -222,7 +282,7 @@ class FloatingText {
 
   update() {
     this.y -= 0.8;
-    this.scale += 0.015;
+    this.scale += 0.012;
     this.alpha -= 0.025;
   }
 
@@ -231,35 +291,46 @@ class FloatingText {
     ctx.save();
     ctx.globalAlpha = Math.max(0, this.alpha);
     ctx.fillStyle = "#ffffff";
-    const baseSize = width < 600 ? 18 : 22;
+    const baseSize = width < 600 ? 16 : 22;
     ctx.font = `bold ${Math.floor(baseSize * this.scale)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.shadowColor = `rgb(${this.color.r}, ${this.color.g}, ${this.color.b})`;
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = 12;
     ctx.fillText(this.text, this.x, this.y);
     ctx.restore();
   }
 }
 
-// Inicializar el Canvas
 setupCanvas();
 
-// Crear orbes espaciadas en altura para que vayan emergiendo progresivamente en orden
-const totalOrbs = width < 600 ? 5 : 7;
-for (let i = 0; i < totalOrbs; i++) {
-  orbes.push(new Orb(i * 120)); // Distancia inicial en Y
+function spawnNextWord() {
+  let startY = height + 60;
+  
+  if (orbes.length > 0) {
+    const lastOrb = orbes[orbes.length - 1];
+    const distanceBetween = width < 600 ? 140 : 170;
+    if (lastOrb.y > height - distanceBetween) {
+      startY = lastOrb.y + distanceBetween;
+    }
+  }
+
+  const word = wordList[wordIndex];
+  orbes.push(new Orb(word, startY));
+  wordIndex = (wordIndex + 1) % wordList.length; 
 }
 
-// Eventos táctiles y de clic para iniciar música y explotar orbes
-window.addEventListener('click', playAudio, { once: true });
-window.addEventListener('touchstart', playAudio, { once: true });
+for (let i = 0; i < 3; i++) {
+  spawnNextWord();
+}
 
 function handleInteraction(clientX, clientY) {
   orbes.forEach(orb => {
-    const dist = Math.hypot(orb.x - clientX, orb.y - clientY);
-    if (dist < orb.radius + 25) {
-      orb.explode();
+    if (orb.active) {
+      const dist = Math.hypot(orb.x - clientX, orb.y - clientY);
+      if (dist < orb.radius + 25) {
+        orb.explode(true);
+      }
     }
   });
 }
@@ -275,17 +346,25 @@ canvas.addEventListener('click', (e) => {
   handleInteraction(e.clientX, e.clientY);
 });
 
-// Bucle de animación
 function animate() {
   ctx.fillStyle = '#020208';
   ctx.fillRect(0, 0, width, height);
 
   drawStars();
 
-  orbes.forEach(orb => {
-    orb.update();
-    orb.draw();
-  });
+  if (orbes.length < 5) {
+    spawnNextWord();
+  }
+
+  for (let i = orbes.length - 1; i >= 0; i--) {
+    const orb = orbes[i];
+    if (orb.active) {
+      orb.update();
+      orb.draw();
+    } else {
+      orbes.splice(i, 1);
+    }
+  }
 
   for (let i = particles.length - 1; i >= 0; i--) {
     particles[i].update();
